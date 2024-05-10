@@ -1,0 +1,19 @@
+[package]
+name = "domain"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+itertools = { workspace = true }
+log = { workspace = true }
+assertables = { workspace = true }
+csv-async = { workspace = true, features = ["serde"] }
+serde = { version = "1.0.200", features = ["derive"] }
+rusty-money = "0.4.1"
+rust_decimal = "1.35.0"
+enum-display-derive = "0.1.1"
+futures = "0.3.30"
+async-std = "1.12.0"
+tokio-stream = "0.1.15"
+futures-io = "0.3.30"

@@ -25,7 +25,7 @@ The implementation is designed to support multiple concurrent csv streams using 
 ### Caveats
 - It is necessary to keep a transaction cache in memory as long as new transaction are coming in, as they can refer to any previous transactions, but because there is no persistence layer, the transaction cache can grow to the point of exceeding memory limits.
 - In `processor.rs:131/144/157`, i mention that the operations of modifying the account balance and the transaction state should be atomic. This could be implemented using DB transactions for example.
-- I wasn't sure what "Likewise, transaction IDs (tx) are globally unique" means but i allow for both interpretations, see the comment when handling this case in `processor.rs:49` 
+- I wasn't sure what "Likewise, transaction IDs (tx) are globally unique" means but i allow for both interpretations, see the comment when handling this case in `main.rs:47` 
 
 Thank you for reviewing my submission!
 

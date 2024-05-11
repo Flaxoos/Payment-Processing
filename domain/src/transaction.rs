@@ -171,12 +171,12 @@ impl TryFrom<CsvResult<TransactionRow>> for Transaction {
 				Ok(match transaction_row.tx_type {
 					TransactionRowType::Deposit => Transaction::deposit(
 						transaction_row.tx_id,
-						transaction_row.amount.unwrap(),
+						transaction_row.amount.ok_or(CsvError::custom("Deposit must have an amount"))?,
 						transaction_row.client,
 					),
 					TransactionRowType::Withdrawal => Transaction::withdrawal(
 						transaction_row.tx_id,
-						transaction_row.amount.unwrap(),
+						transaction_row.amount.ok_or(CsvError::custom("Withdrawal must have an amount"))?,
 						transaction_row.client,
 					),
 					TransactionRowType::Dispute => {
@@ -295,7 +295,7 @@ impl Transaction {
 	///
 	/// # Errors
 	///
-	/// * Returns [`TransactionError::IllegalStateChange`] if the state transition is not allowed.
+	/// * Returns [`IllegalStateChange`] if the state transition is not allowed.
 	/// * Returns [`InvalidTransactionId`] if the transaction does not have a changeable state.
 	fn change_state(
 		&mut self,

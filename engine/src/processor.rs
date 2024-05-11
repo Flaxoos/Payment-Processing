@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use log::debug;
 use tokio::sync::Mutex;
 
 use domain::account::Account;
 use domain::amount::Amount;
 use domain::config::{ClientId, TransactionId};
-use domain::transaction::{StreamExt, Transaction, TransactionError};
 use domain::transaction::TransactionError::*;
+use domain::transaction::{CsvError, StreamExt, Transaction, TransactionError};
 
 type Accounts = HashMap<ClientId, (Account, HashMap<TransactionId, Transaction>)>;
 /// Processes and manages transactions for multiple accounts.
@@ -22,6 +23,16 @@ pub struct TransactionProcessor {
 	global_tx_ids: Arc<Mutex<HashSet<TransactionId>>>,
 }
 
+#[derive(Debug)]
+pub enum TransactionProcessorError {
+	TransactionProcessingError(TransactionError),
+	TransactionParsingError(CsvError),
+}
+
+trait TransactionProcessorErrorHandler {
+	fn handle(error: TransactionProcessorError);
+}
+
 impl TransactionProcessor {
 	/// Processes a stream of transactions from a CSV reader.
 	///
@@ -31,43 +42,24 @@ impl TransactionProcessor {
 	/// # Errors
 	///
 	/// Returns a `TransactionError` if an error occurs while parsing transactions or handling individual transactions.
-	pub async fn process_transactions(
+	pub async fn process_transactions<F>(
 		reader: impl domain::transaction::AsyncRead + Unpin + Send + 'static,
-	) -> Result<Vec<Account>, TransactionError> {
+		error_handler: F,
+	) -> Result<Vec<Account>, TransactionError>
+	where
+		F: Fn(TransactionProcessorError),
+	{
 		let mut tx_stream = Transaction::tx_stream(reader);
 		let mut tx_processor = TransactionProcessor::default();
-		while let Some(tx) = tx_stream.next().await {
-			match tx {
-				Ok(tx) => tx_processor.handle_transaction(tx).await.map_err(|e| match e {
-					TransactionNotFound(tx) => {
-						eprintln!(
-							"Warning: Ignoring transaction referencing unknown transaction {:?}: ",
-							&tx
-						);
-					},
-					DuplicateGlobalTransactionId(tx) => {
-						// or panic, depending on the meaning of "Likewise, transaction IDs (tx) are globally unique", as in, should it be guaranteed ot is it guaranteed.
-						eprintln!("Warning: Found duplicate global transaction id in: {:?}: ", &tx);
-					},
-					InvalidTransactionId(tx) => {
-						panic!("Error: Transaction chain is wrong for transaction {:?}", &tx);
-					},
-					InsufficientFunds(tx) => {
-						eprintln!("Warning: Insufficient funds for transaction {:?}: ", &tx);
-					},
-					IllegalStateChange(tx) => {
-						panic!("Error: Illegal state change for transaction {:?}: ", &tx);
-					},
-					AccountFrozen(tx) => {
-						eprintln!("Warning: Account frozen for transaction {:?}: ", &tx);
-					},
-				}),
-				Err(csv_error) => {
-					eprintln!("Error parsing transaction: {:?}", csv_error);
-					Ok(())
-				},
-			}
-			.unwrap();
+		while let Some(tx_result) = tx_stream.next().await {
+			match tx_result.map_err(TransactionProcessorError::TransactionParsingError) {
+				Ok(tx) => tx_processor
+					.handle_transaction(tx)
+					.await
+					.map_err(TransactionProcessorError::TransactionProcessingError)
+					.unwrap_or_else(|e| error_handler(e)),
+				Err(e) => error_handler(e),
+			};
 		}
 		let accounts = tx_processor.get_accounts();
 		Ok(accounts.await)
@@ -89,6 +81,7 @@ impl TransactionProcessor {
 	/// - InvalidTransactionId: If the transaction ID is invalid for the operation.
 	/// - TransactionNotFound: If a dispute, resolve, or chargeback references a non-existent transaction.
 	async fn handle_transaction(&mut self, tx: Transaction) -> Result<(), TransactionError> {
+		debug!("Processing transaction: {:?}", &tx);
 		let mut accounts = self.accounts.lock().await;
 		let mut global_tx_ids = self.global_tx_ids.lock().await;
 
@@ -177,12 +170,13 @@ impl TransactionProcessor {
 }
 #[cfg(test)]
 mod tests {
+	use log::error;
 	use tempfile::NamedTempFile;
 
 	use domain::amount::Amount;
 	use domain::transaction::File;
 
-	use crate::processor::TransactionProcessor;
+	use crate::processor::{TransactionProcessor, TransactionProcessorError};
 
 	struct TestTransactionsCsvBuilder<'a> {
 		temp_file: NamedTempFile,
@@ -251,6 +245,10 @@ mod tests {
 		Amount::try_from(value).unwrap()
 	}
 
+	fn error_handler(e: TransactionProcessorError) {
+		error!("{e:?}");
+	}
+
 	#[tokio::test]
 	async fn test_process_transactions_simple() {
 		enable_debug_logs();
@@ -264,7 +262,8 @@ mod tests {
 			.await;
 
 		let reader = transactions_csv.reader().await;
-		let accounts = TransactionProcessor::process_transactions(reader).await.unwrap();
+		let accounts =
+			TransactionProcessor::process_transactions(reader, error_handler).await.unwrap();
 
 		assert_eq!(accounts.len(), 1);
 
@@ -289,7 +288,8 @@ mod tests {
 			.await;
 
 		let reader = transactions_csv.reader().await;
-		let accounts = TransactionProcessor::process_transactions(reader).await.unwrap();
+		let accounts =
+			TransactionProcessor::process_transactions(reader, error_handler).await.unwrap();
 
 		assert_eq!(accounts.len(), 1);
 
@@ -316,7 +316,8 @@ mod tests {
 			.await;
 
 		let reader = transactions_csv.reader().await;
-		let accounts = TransactionProcessor::process_transactions(reader).await.unwrap();
+		let accounts =
+			TransactionProcessor::process_transactions(reader, error_handler).await.unwrap();
 
 		assert_eq!(accounts.len(), 1);
 
@@ -345,7 +346,8 @@ mod tests {
 			.await;
 
 		let reader = transactions_csv.reader().await;
-		let accounts = TransactionProcessor::process_transactions(reader).await.unwrap();
+		let accounts =
+			TransactionProcessor::process_transactions(reader, error_handler).await.unwrap();
 
 		assert_eq!(accounts.len(), 1);
 
@@ -373,7 +375,8 @@ mod tests {
 			.await;
 
 		let reader = transactions_csv.reader().await;
-		let accounts = TransactionProcessor::process_transactions(reader).await.unwrap();
+		let accounts =
+			TransactionProcessor::process_transactions(reader, error_handler).await.unwrap();
 
 		assert_eq!(accounts.len(), 1);
 

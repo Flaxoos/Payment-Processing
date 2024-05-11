@@ -3,7 +3,7 @@ use std::ops::AddAssign;
 use std::ops::SubAssign;
 
 use rusty_money::iso::Currency;
-use rusty_money::Money;
+use rusty_money::{Money, MoneyError};
 
 use crate::amount::AmountError::{NegativeValue, SubtractToNegative};
 use crate::config::CURRENCY;
@@ -16,10 +16,11 @@ pub struct Amount {
 
 pub(crate) type AmountResult = Result<Amount, AmountError>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AmountError {
 	NegativeValue(Money<'static, Currency>),
 	SubtractToNegative(Amount, Amount),
+	InvalidAmount(MoneyError),
 }
 
 impl std::fmt::Debug for Amount {
@@ -30,7 +31,7 @@ impl std::fmt::Debug for Amount {
 
 impl Default for Amount {
 	fn default() -> Self {
-		Amount { value: Money::from_str("0.0", CURRENCY).unwrap() }
+		Amount { value: Money::from_str("0.0", CURRENCY).expect("0.0 should be valid") }
 	}
 }
 
@@ -53,7 +54,9 @@ impl TryFrom<&str> for Amount {
 	type Error = AmountError;
 
 	fn try_from(value: &str) -> Result<Self, Self::Error> {
-		Amount::try_from(Money::from_str(value, CURRENCY).unwrap())
+		Amount::try_from(
+			Money::from_str(value, CURRENCY).map_err(|e| AmountError::InvalidAmount(e))?,
+		)
 	}
 }
 
@@ -82,6 +85,7 @@ impl fmt::Display for AmountError {
 			SubtractToNegative(lhs, rhs) => {
 				write!(f, "Subtraction results in negative amount: {} - {}", lhs.value, rhs.value)
 			},
+			AmountError::InvalidAmount(err) => write!(f, "Invalid amount: {}", err),
 		}
 	}
 }

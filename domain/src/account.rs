@@ -1,6 +1,6 @@
+use crate::account::AccountError::{AccountLocked, Arithmetic};
 use log::debug;
 use AccountError::InsufficientFunds;
-use crate::account::AccountError::AccountLocked;
 
 use crate::amount::{Amount, AmountError};
 use crate::config::ClientId;
@@ -12,6 +12,9 @@ pub enum AccountError {
 	AccountLocked,
 	/// The account has insufficient funds for the requested operation.
 	InsufficientFunds,
+
+	/// An unknown error occurred.
+	Arithmetic(AmountError),
 }
 
 impl From<AmountError> for AccountError {
@@ -23,6 +26,7 @@ impl From<AmountError> for AccountError {
 		match value {
 			AmountError::NegativeValue(money) => unreachable!("{} Should not be negative", money),
 			AmountError::SubtractToNegative(_, _) => InsufficientFunds,
+			AmountError::InvalidAmount(_) => Arithmetic(value),
 		}
 	}
 }
@@ -151,8 +155,8 @@ impl Account {
 
 #[cfg(test)]
 mod tests {
-	use crate::account::AccountError::AccountLocked;
 	use super::*;
+	use crate::account::AccountError::AccountLocked;
 
 	#[test]
 	fn test_new_account() {

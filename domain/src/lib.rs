@@ -14,8 +14,8 @@ mod tests {
 
 	use crate::amount::{Amount, AmountResult};
 	use crate::config::CURRENCY;
-	use crate::transaction::{CsvError, CsvResult, TransactionRow, TransactionRowType};
 	use crate::transaction::Transaction;
+	use crate::transaction::{CsvError, CsvResult, TransactionRow, TransactionRowType};
 
 	fn amount() -> Option<Amount> {
 		Some(Amount::try_from(Money::from_str("0.1", CURRENCY).unwrap()).unwrap())

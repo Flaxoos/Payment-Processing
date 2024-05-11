@@ -1,26 +1,28 @@
 use core::fmt;
 use std::fmt::Display;
 
-pub use csv_async::{
-	  Result as CsvResult,
-	  Error as CsvError
-};
+pub use async_std::fs::File;
 use csv_async::{AsyncReaderBuilder, DeserializeRecordsIntoStream, Trim};
-pub use futures::Stream;
+pub use csv_async::{Error as CsvError, Result as CsvResult};
 pub use futures::stream::Map;
 pub use futures::stream::StreamExt;
+pub use futures::Stream;
 pub use futures_io::AsyncRead;
 use log::error;
 use rust_decimal::Decimal;
 use rusty_money::Money;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Visitor;
 use serde::ser::Error;
-pub use async_std::fs::File;
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+
+use TransactionError::{AccountFrozen, InsufficientFunds};
+
 use crate::account::AccountError;
 use crate::amount::Amount;
-use crate::config::{ClientId, CURRENCY, MAX_DECIMAL_PLACES, ROUNDING, TransactionId};
-use crate::transaction::TransactionError::{IllegalStateChange, InvalidTransactionId};
+use crate::config::{ClientId, TransactionId, CURRENCY, MAX_DECIMAL_PLACES, ROUNDING};
+use crate::transaction::TransactionError::{
+	IllegalStateChange, InternalError, InvalidTransactionId,
+};
 
 /// Represents the different types of transaction rows.
 #[derive(Debug, Deserialize, PartialEq, Display)]
@@ -124,6 +126,8 @@ pub enum TransactionError {
 	IllegalStateChange(Transaction),
 	/// The referenced account has been frozen.
 	AccountFrozen(Transaction),
+	/// The transaction could not be processed due to an internal error.
+	InternalError(Transaction, String),
 }
 
 /// Represents the possible states of a transaction.
@@ -194,8 +198,9 @@ impl TryFrom<CsvResult<TransactionRow>> for Transaction {
 impl From<(AccountError, Transaction)> for TransactionError {
 	fn from((err, tx): (AccountError, Transaction)) -> Self {
 		match err {
-			AccountError::InsufficientFunds => TransactionError::InsufficientFunds(tx),
-			AccountError::AccountLocked => TransactionError::AccountFrozen(tx),
+			AccountError::InsufficientFunds => InsufficientFunds(tx),
+			AccountError::AccountLocked => AccountFrozen(tx),
+			AccountError::Arithmetic(e) => InternalError(tx, e.to_string()),
 		}
 	}
 }
@@ -291,7 +296,7 @@ impl Transaction {
 	/// # Errors
 	///
 	/// * Returns [`TransactionError::IllegalStateChange`] if the state transition is not allowed.
-	/// * Returns [`TransactionError::InvalidTransactionId`] if the transaction does not have a changeable state.
+	/// * Returns [`InvalidTransactionId`] if the transaction does not have a changeable state.
 	fn change_state(
 		&mut self,
 		transaction_state: TransactionState,
